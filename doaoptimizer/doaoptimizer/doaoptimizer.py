@@ -81,8 +81,8 @@ class DOAOptimizer(Node):
       self.v_dw = self.beta2*self.v_dw + (1-self.beta2)*(dw**2)
       
       ## bias correction
-      #m_dw_corr = self.m_dw/(1-self.beta1**t)
-      #v_dw_corr = self.v_dw/(1-self.beta2**t)
+      m_dw_corr = self.m_dw/(1-self.beta1**t)
+      v_dw_corr = self.v_dw/(1-self.beta2**t)
       m_dw_corr = self.m_dw/(1-self.beta1)
       v_dw_corr = self.v_dw/(1-self.beta2)
       #print(f"DOAOpt: m_dw {self.m_dw}, v_dw {self.v_dw}, m_dw_corr {m_dw_corr}, v_dw_corr {v_dw_corr}")
