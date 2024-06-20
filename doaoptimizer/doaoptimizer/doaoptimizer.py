@@ -33,7 +33,7 @@ class DOAOptimizer(Node):
     self.beta1 = 0.9
     self.beta2 = 0.999
     self.epsilon = 1e-8
-    self.eta = 1
+    self.eta = 0.65
     
     self.opt_thread = Thread(target=self.do_doaopt)
     self.opt_thread.start()
@@ -53,7 +53,6 @@ class DOAOptimizer(Node):
       self.request_sdr = False
   
   def do_doaopt(self):
-    t = 0
     while True:
       print(f"DOAOpt: publishing current doa -> {self.curr_doa[0]}")
       msg = Float32()
@@ -68,7 +67,6 @@ class DOAOptimizer(Node):
       while self.request_sdr:
         time.sleep(0.001)
       #print(f"DOAOpt: SDR -> {self.curr_sdr} - {t}")
-      t += 1
       
       #print(f"DOAOpt: doing optimization...")
       dw = self.gradient(self.curr_doa,self.curr_sdr) # 
@@ -81,8 +79,8 @@ class DOAOptimizer(Node):
       self.v_dw = self.beta2*self.v_dw + (1-self.beta2)*(dw**2)
       
       ## bias correction
-      m_dw_corr = self.m_dw/(1-self.beta1**t)
-      v_dw_corr = self.v_dw/(1-self.beta2**t)
+      m_dw_corr = self.m_dw/(1-self.beta1)
+      v_dw_corr = self.v_dw/(1-self.beta2)
       #print(f"DOAOpt: m_dw {self.m_dw}, v_dw {self.v_dw}, m_dw_corr {m_dw_corr}, v_dw_corr {v_dw_corr}")
       
       ## update value
