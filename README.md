@@ -39,18 +39,22 @@ The `theta` topic is then subscribed to by the [`beamform2`](https://github.com/
 1. Start the `jackaudio` server.
 
 2. Start the `phase` beamformer from `beamform2`:
- 
+
    `ros2 launch beamform2 phase.launch`
 
 3. Run `demucs`:
 
    `ros2 run demucs demucs`
 
-4. Run `online_sqa`:
+4. Start `jack_write` from `beamform2` to listen to the result:
+
+   `ros2 launch beamform2 rosjack_write.launch`
+
+5. Run `online_sqa`:
 
    `ros2 run online_sqa online_sqa`
 
-5. Run `doaoptimizer`:
+6. Run `doaoptimizer`:
 
    `ros2 run doaoptimizer doaoptimizer`
 
