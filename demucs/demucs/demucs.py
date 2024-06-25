@@ -16,9 +16,9 @@ class DemucsPhaseROSAudio(Node):
     super().__init__('demucs')
     
     self.device = "cuda"
-    self.subscription = self.create_subscription(JackAudio, '/jackaudio', self.jackaudio_callback,10)
+    self.subscription = self.create_subscription(JackAudio, '/jackaudio', self.jackaudio_callback,1000)
     self.subscription  # prevent unused variable warning
-    self.publisher = self.create_publisher(JackAudio, '/jackaudio_filtered', 10)
+    self.publisher = self.create_publisher(JackAudio, '/jackaudio_filtered', 1000)
     
     this_share_directory = get_package_share_directory('demucs')
     this_base_directory = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(this_share_directory))))

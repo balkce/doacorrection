@@ -28,10 +28,10 @@ class OnlineSQA(Node):
     super().__init__('onlinesqa')
     
     self.device = "cuda:0"
-    self.subscription = self.create_subscription(JackAudio,'/jackaudio_filtered',self.jackaudio_callback,10)
-    #self.subscription = self.create_subscription(JackAudio,'/jackaudio',self.jackaudio_callback,10)
+    self.subscription = self.create_subscription(JackAudio,'/jackaudio_filtered',self.jackaudio_callback,1000)
+    #self.subscription = self.create_subscription(JackAudio,'/jackaudio',self.jackaudio_callback,1000)
     self.subscription  # prevent unused variable warning
-    self.publisher = self.create_publisher(Float32, '/SDR', 10)
+    self.publisher = self.create_publisher(Float32, '/SDR', 1000)
     
     self.objective_model = SQUIM_OBJECTIVE.get_model().to(self.device)
     
@@ -45,7 +45,7 @@ class OnlineSQA(Node):
     self.win = torch.zeros(1,self.win_len)
     
     self.num_hops = int(self.win_len/self.hop_len)
-    self.num_hops_towait = 2
+    self.num_hops_towait = int(self.num_hops/3)
     self.win_sdr_start = 0
     self.win_sdr_end = 0
     
@@ -81,19 +81,20 @@ class OnlineSQA(Node):
     self.vad_confs = torch.zeros(self.num_hops)
     
   def jackaudio_callback(self, msg):
-    self.win = torch.roll(self.win,len(msg.data))
-    self.win[0,0:len(msg.data)] = torch.Tensor(msg.data)
+    self.win = torch.roll(self.win,-len(msg.data))
+    self.win[0,-len(msg.data):] = torch.Tensor(msg.data)
     self.hop_i += len(msg.data)
     
     if self.hop_i >= self.hop_len:
       #start_time = time.time()
-      new_confidence = self.vad(self.win[0,0:self.hop_i], self.samplerate).item()
+      new_confidence = self.vad(self.win[0,-self.hop_i:], self.samplerate).item()
       #exec_time = time.time() - start_time
       #self.get_logger().info('VAD confidence: %0.2f, in %f secs' % (new_confidence, exec_time))
       
       self.vad_confs = torch.roll(self.vad_confs,1)
       self.vad_confs[0] = 1 if new_confidence > self.vad_threshold else 0
       
+      #print(self.vad_confs)
       if torch.sum(self.vad_confs) == self.num_hops:
         #the user has not shut up for the whole window
         self.win_sdr_start = 0
@@ -104,13 +105,15 @@ class OnlineSQA(Node):
       elif self.vad_confs[0] == 1:
         #the user is talking
         vad_where = torch.where(self.vad_confs[:-1] != self.vad_confs[1:])[0]
+        #print(vad_where)
         if vad_where.shape[0] > 0:
           hop_num_stop = vad_where[0].item()+1
           if hop_num_stop > self.num_hops_towait:
-            self.win_sdr_start = 0
-            win_i = hop_num_stop*self.hop_i
-            self.win_sdr_end = win_i if win_i < self.win_len else self.win_len
-              
+            win_i = (self.num_hops-hop_num_stop)*self.hop_len
+            self.win_sdr_start = win_i if win_i >= 0 else 0
+            
+            self.win_sdr_end = self.win_len
+            
             while self.sqa_ready:
               time.sleep(0.01)
             self.sqa_ready = True
@@ -132,6 +135,7 @@ class OnlineSQA(Node):
         time.sleep(0.001)
       
       #start_time = time.time()
+      #print(str(self.win_sdr_start)+" -> "+str(self.win_sdr_end))
       win_clone = self.win.to(self.device)
       stoi_hyp, pesq_hyp, si_sdr_hyp = self.objective_model(win_clone[0,self.win_sdr_start:self.win_sdr_end].unsqueeze(0))
       unfiltered_observation = si_sdr_hyp.item()

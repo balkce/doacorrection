@@ -17,9 +17,9 @@ class DOAOptimizer(Node):
     self.init_doa = self.get_parameter('init_doa').get_parameter_value().double_value
     print(f"DOAOpt: init_doa is {self.init_doa}")
     
-    self.subscription = self.create_subscription(Float32,'/SDR',self.sdr_callback,10)
+    self.subscription = self.create_subscription(Float32,'/SDR',self.sdr_callback,1000)
     self.subscription  # prevent unused variable warning
-    self.publisher = self.create_publisher(Float32, '/theta', 10)
+    self.publisher = self.create_publisher(Float32, '/theta', 1000)
     
     self.past_samples = 2
     
@@ -30,10 +30,10 @@ class DOAOptimizer(Node):
     self.past_sdr = 0.0
     
     self.m_dw, self.v_dw = 0, 0
-    self.beta1 = 0.9
-    self.beta2 = 0.999
+    self.beta_m = 0.9
+    self.beta_v = 0.999
     self.epsilon = 1e-8
-    self.eta = 0.65
+    self.eta = 0.1
     
     self.opt_thread = Thread(target=self.do_doaopt)
     self.opt_thread.start()
@@ -72,20 +72,15 @@ class DOAOptimizer(Node):
       dw = self.gradient(self.curr_doa,self.curr_sdr) # 
       #print(f"DOAOpt: current gradient is {dw}")
       
-      ## momentum beta 1
-      self.m_dw = self.beta1*self.m_dw + (1-self.beta1)*dw
+      ## momentum update
+      self.m_dw = self.beta_m*self.m_dw + (1-self.beta_m)*dw
       
-      ## rms beta 2
-      self.v_dw = self.beta2*self.v_dw + (1-self.beta2)*(dw**2)
+      ## variance update
+      self.v_dw = self.beta_v*self.v_dw + (1-self.beta_v)*(dw**2)
       
-      ## bias correction
-      m_dw_corr = self.m_dw/(1-self.beta1)
-      v_dw_corr = self.v_dw/(1-self.beta2)
-      #print(f"DOAOpt: m_dw {self.m_dw}, v_dw {self.v_dw}, m_dw_corr {m_dw_corr}, v_dw_corr {v_dw_corr}")
-      
-      ## update value
+      ## value update
       self.curr_doa[1:] = self.curr_doa[:-1]
-      self.curr_doa[0] = self.curr_doa[0] - self.eta*(m_dw_corr/(np.sqrt(v_dw_corr)+self.epsilon))
+      self.curr_doa[0] = self.curr_doa[0] - self.eta*(m_dw/(np.sqrt(v_dw)+self.epsilon))
 
 def main(args=None):
   rclpy.init(args=args)
