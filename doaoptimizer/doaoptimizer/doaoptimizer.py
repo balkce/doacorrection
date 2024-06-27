@@ -33,7 +33,7 @@ class DOAOptimizer(Node):
     self.beta_m = 0.9
     self.beta_v = 0.999
     self.epsilon = 1e-8
-    self.eta = 0.1
+    self.eta = 0.175
     
     self.opt_thread = Thread(target=self.do_doaopt)
     self.opt_thread.start()
