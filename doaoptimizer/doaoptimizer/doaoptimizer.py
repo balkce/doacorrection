@@ -16,6 +16,9 @@ class DOAOptimizer(Node):
     self.declare_parameter('init_doa', 0.0)
     self.init_doa = self.get_parameter('init_doa').get_parameter_value().double_value
     print(f"DOAOpt: init_doa is {self.init_doa}")
+    self.declare_parameter('eta', 0.15)
+    self.eta = self.get_parameter('eta').get_parameter_value().double_value
+    print(f"DOAOpt: eta is {self.eta}")
     
     self.subscription = self.create_subscription(Float32,'/SDR',self.sdr_callback,1000)
     self.subscription  # prevent unused variable warning
@@ -33,7 +36,6 @@ class DOAOptimizer(Node):
     self.beta_m = 0.9
     self.beta_v = 0.999
     self.epsilon = 1e-8
-    self.eta = 0.175
     
     self.opt_thread = Thread(target=self.do_doaopt)
     self.opt_thread.start()

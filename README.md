@@ -62,4 +62,8 @@ If you have an initial DOA estimate of the source of interest (SOI), you can pro
 
 `ros2 run doaoptimizer doaoptimizer  --ros-args -p init_doa:=20.0`
 
+Also, the default learning rate is set at 0.15, since it provided good results in our tests. However, if you want to change it at run-time, you can do so through the `eta` parameter. For example, if the SOI is located at 20 degrees, and you want to have a learning rate of 0.1, run `doaoptimizer` with:
+
+`ros2 run doaoptimizer doaoptimizer  --ros-args -p init_doa:=20.0 -p eta:=0.1`
+
 The `jackaudio_filtered` topic provides the DOA-corrected enhanced speech.
