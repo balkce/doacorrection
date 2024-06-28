@@ -36,22 +36,34 @@ class OnlineSQA(Node):
     self.objective_model = SQUIM_OBJECTIVE.get_model().to(self.device)
     
     self.samplerate = 16000
+    self.vad_hop_len = 512 #Silvero-VAD only permits chunks of 512 at samplerate = 16000
+    self.vad_hop_secs = self.vad_hop_len/self.samplerate
+    self.jack_hop_len = 1024 #taken from JACK configuration, make it so that it is a multiple of self.vad_hop_len
+    
     self.hop_secs = hop_secs
     self.hop_len = int(round(self.hop_secs*self.samplerate))
+    self.hop_len = math.ceil(self.hop_len/self.vad_hop_len)*self.vad_hop_len
+    self.hop_secs = self.hop_len/self.samplerate
     self.hop_i = 0
     self.hop_i_ref = 0
     self.win_len_secs = win_len_secs
     self.win_len = int(round(self.win_len_secs*self.samplerate))
+    self.win_len = math.ceil(self.win_len/self.vad_hop_len)*self.vad_hop_len
+    self.win_len_secs = self.win_len/self.samplerate
     self.win = torch.zeros(1,self.win_len)
     
-    self.num_hops = int(self.win_len/self.hop_len)
-    self.num_hops_towait = int(self.num_hops/3)
+    self.num_hops = int(self.win_len/self.hop_len) 
+    self.vad_num_hops = math.ceil(self.win_len/self.vad_hop_len) 
+    self.vad_num_hops_in_num_hops = int(self.hop_len/self.vad_hop_len) 
+    self.num_hops_towait = int(self.vad_num_hops/3)
+    self.num_hops_vad = int(self.num_hops/2)
     self.win_sdr_start = 0
     self.win_sdr_end = 0
     
-    self.get_logger().info('sample rate (ass.): %d' % self.samplerate)
-    self.get_logger().info('window length     : %f (%d samples)' % (self.win_len_secs, self.win_len))
-    self.get_logger().info('hop length        : %f (%d samples, %d hops in window)' % (self.hop_secs, self.hop_len, self.num_hops))
+    self.get_logger().info('sample rate    : %d' % self.samplerate)
+    self.get_logger().info('window length  : %f (%d samples)' % (self.win_len_secs, self.win_len))
+    self.get_logger().info('hop length     : %f (%d samples, %d hops in window)' % (self.hop_secs, self.hop_len, self.num_hops))
+    self.get_logger().info('VAD hop length : %f (%d samples, %d hops in window, %d in hop length)' % (self.vad_hop_secs, self.vad_hop_len, self.vad_num_hops, self.vad_num_hops_in_num_hops))
     
     self.sqa_ready = False
     self.sqa_ready_ref = False
@@ -73,50 +85,38 @@ class OnlineSQA(Node):
     #  transition_covariance=np.array([0.1])
     #)
     
-    self.smooth_weight = 0.5 # to use with kalman filter 0.5
+    self.smooth_weight = 0.95
     self.smooth_val = None
   
-    self.vad, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=True)
-    self.vad_threshold = 0.15
-    self.vad_confs = torch.zeros(self.num_hops)
+    self.vad, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', trust_repo=True)
+    self.vad_threshold = 0.85
+    self.vad_confs = torch.zeros(self.vad_num_hops)
     
   def jackaudio_callback(self, msg):
     self.win = torch.roll(self.win,-len(msg.data))
     self.win[0,-len(msg.data):] = torch.Tensor(msg.data)
     self.hop_i += len(msg.data)
     
-    if self.hop_i >= self.hop_len:
+    for i in range(0, len(msg.data), self.vad_hop_len):
       #start_time = time.time()
-      new_confidence = self.vad(self.win[0,-self.hop_i:], self.samplerate).item()
+      i_start = self.win_len - (len(msg.data)-i)
+      i_end = self.win_len - (len(msg.data) - (i+self.vad_hop_len))
+      new_confidence = self.vad(self.win[0,i_start:i_end], self.samplerate).item()
       #exec_time = time.time() - start_time
       #self.get_logger().info('VAD confidence: %0.2f, in %f secs' % (new_confidence, exec_time))
       
       self.vad_confs = torch.roll(self.vad_confs,1)
       self.vad_confs[0] = 1 if new_confidence > self.vad_threshold else 0
-      
+    
+    if self.hop_i >= self.hop_len:
       #print(self.vad_confs)
-      if torch.sum(self.vad_confs) == self.num_hops:
-        #the user has not shut up for the whole window
+      if torch.sum(self.vad_confs) >= (self.vad_num_hops*3/4):
+        #the user has talked through the whole win_len window
         self.win_sdr_start = 0
         self.win_sdr_end = self.win_len
         while self.sqa_ready:
           time.sleep(0.01)
         self.sqa_ready = True
-      elif self.vad_confs[0] == 1:
-        #the user is talking
-        vad_where = torch.where(self.vad_confs[:-1] != self.vad_confs[1:])[0]
-        #print(vad_where)
-        if vad_where.shape[0] > 0:
-          hop_num_stop = vad_where[0].item()+1
-          if hop_num_stop > self.num_hops_towait:
-            win_i = (self.num_hops-hop_num_stop)*self.hop_len
-            self.win_sdr_start = win_i if win_i >= 0 else 0
-            
-            self.win_sdr_end = self.win_len
-            
-            while self.sqa_ready:
-              time.sleep(0.01)
-            self.sqa_ready = True
       
       self.hop_i = 0
   

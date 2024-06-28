@@ -16,7 +16,7 @@ class DOAOptimizer(Node):
     self.declare_parameter('init_doa', 0.0)
     self.init_doa = self.get_parameter('init_doa').get_parameter_value().double_value
     print(f"DOAOpt: init_doa is {self.init_doa}")
-    self.declare_parameter('eta', 0.15)
+    self.declare_parameter('eta', 0.22)
     self.eta = self.get_parameter('eta').get_parameter_value().double_value
     print(f"DOAOpt: eta is {self.eta}")
     
