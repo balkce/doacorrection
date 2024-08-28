@@ -72,12 +72,12 @@ The `jackaudio_filtered` topic provides the DOA-corrected enhanced speech.
 
 If you end up using this software, please credit it as:
 
-`
+```BibTex
 @article{rascon2024direction,
   title={Direction of Arrival Correction through Speech Quality Feedback},
   author={Rascon, Caleb},
   journal={arXiv preprint arXiv:2408.07234},
   year={2024}
 }
-`
+```
 
