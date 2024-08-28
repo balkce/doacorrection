@@ -67,3 +67,17 @@ Also, the default learning rate is set at 0.15, since it provided good results i
 `ros2 run doaoptimizer doaoptimizer  --ros-args -p init_doa:=20.0 -p eta:=0.1`
 
 The `jackaudio_filtered` topic provides the DOA-corrected enhanced speech.
+
+## Citation:
+
+If you end up using this software, please credit it as:
+
+`
+@article{rascon2024direction,
+  title={Direction of Arrival Correction through Speech Quality Feedback},
+  author={Rascon, Caleb},
+  journal={arXiv preprint arXiv:2408.07234},
+  year={2024}
+}
+`
+
