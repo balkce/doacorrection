@@ -58,15 +58,35 @@ The `theta` topic is then subscribed to by the [`beamform2`](https://github.com/
 
    `ros2 run doaoptimizer doaoptimizer`
 
-If you have an initial DOA estimate of the source of interest (SOI), you can provide it to `doaoptimizer` through the `init_doa` parameter. For example, if the SOI is located at 20 degrees, run `doaoptimizer` with:
-
-`ros2 run doaoptimizer doaoptimizer  --ros-args -p init_doa:=20.0`
-
-Also, the default learning rate is set at 0.15, since it provided good results in our tests. However, if you want to change it at run-time, you can do so through the `eta` parameter. For example, if the SOI is located at 20 degrees, and you want to have a learning rate of 0.1, run `doaoptimizer` with:
-
-`ros2 run doaoptimizer doaoptimizer  --ros-args -p init_doa:=20.0 -p eta:=0.1`
-
 The `jackaudio_filtered` topic provides the DOA-corrected enhanced speech.
+
+## Hyperparameters:
+
+All the following hyperparamaters can be set using the `--ros-args -p` argument, such as:
+
+`ros2 run module submodule  --ros-args -p hyperparameter1:=value1 -p hyperparameter2:=value2`
+
+Here is the list of modules and their hyperparameters:
+
+- `demucs`:
+  - `input_length`: length (in seconds) of input window (default: 0.512). The higher, the better quality, but the greater response time.
+
+- `online_sqa`:
+  - `hop_secs`: time hop (in seconds) between SDR estimates (default: 1.5).
+  - `win_len_secs`: length (in seconds) of input window (default: 3.0).
+  - `smooth_weight`: smoothing weight to apply to SDR estimate output (default: 0.9).
+
+- `doaoptimizer`:
+  - `init_doa`: initial DOA estimate (in degrees) of the source of interest (default: 0.0).
+  - `eta`: adaptation rate of the Adam variation optimizer (default: 0.3).
+  - `wait_for_sdr`: time (in seconds) to wait for SDR estimate after a new DOA correction is published (default: 1.5). It is highly recommended to use the same value as the `online_sqa`'s `hop_secs` hyperparameter.
+  - `opt_correction`: use new optimization mechanism (default: True). This is explained in the following section.
+
+## New optimization mechanism:
+
+The `doaoptimizer` module can run using the original optimization mechanism that is based on a variation of the Adam optimizer. It can also run using a new optimizer correction mechanism. This new mechanism is run by default, but the original mechanism can be used by running:
+
+   `ros2 run doaoptimizer doaoptimizer  --ros-args -p opt_correction:=False`
 
 ## Citation:
 

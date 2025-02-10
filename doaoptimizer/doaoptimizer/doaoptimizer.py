@@ -5,7 +5,6 @@ from std_msgs.msg import Float32
 
 import time
 import numpy as np
-from sklearn.linear_model import SGDRegressor
 
 from threading import Thread
 
@@ -16,26 +15,43 @@ class DOAOptimizer(Node):
     self.declare_parameter('init_doa', 0.0)
     self.init_doa = self.get_parameter('init_doa').get_parameter_value().double_value
     print(f"DOAOpt: init_doa is {self.init_doa}")
-    self.declare_parameter('eta', 0.1)
+    self.declare_parameter('eta', 0.30)
     self.eta = self.get_parameter('eta').get_parameter_value().double_value
     print(f"DOAOpt: eta is {self.eta}")
+    self.declare_parameter('wait_for_sdr', 1.5)
+    self.wait_for_sdr = self.get_parameter('wait_for_sdr').get_parameter_value().double_value
+    self.declare_parameter('eta_correction', True)
+    self.eta_correction = self.get_parameter('eta_correction').get_parameter_value().bool_value
     
     self.subscription = self.create_subscription(Float32,'/SDR',self.sdr_callback,1000)
     self.subscription  # prevent unused variable warning
     self.publisher = self.create_publisher(Float32, '/theta', 1000)
     
-    self.past_samples = 2
-    
-    self.curr_doa = np.zeros(self.past_samples)
+    self.curr_doa = np.zeros(2)
     self.curr_doa[0] = self.init_doa
+    self.curr_doa[1] = 0.0 #this is really important so that Adam doesn't get stuck at the beginning
     self.request_sdr = False
-    self.curr_sdr = np.zeros(self.past_samples)
-    self.past_sdr = 0.0
+    self.curr_sdr = np.zeros(2)
+    
+    self.max_eta = 0.5
+    self.min_eta = 0.01
+    self.max_doavar = 5
+    
+    self.past_doa_num = 7
+    self.past_doa = np.zeros(self.past_doa_num)
+    self.past_doa_calc = 0
+    self.past_win_wo_corr = 0
+    self.past_win_wo_corr_max = 10
+    
+    self.best_doa = self.init_doa
+    self.best_sdr = None
     
     self.m_dw, self.v_dw = 0, 0
-    self.beta_m = 0.9
-    self.beta_v = 0.999
+    self.beta1 = 0.9
+    self.beta2 = 0.999
     self.epsilon = 1e-8
+    
+    self.past_doas_reset = np.zeros(self.past_doa_num)
     
     self.opt_thread = Thread(target=self.do_doaopt)
     self.opt_thread.start()
@@ -55,34 +71,70 @@ class DOAOptimizer(Node):
       self.request_sdr = False
   
   def do_doaopt(self):
+    t = 0
     while True:
-      print(f"DOAOpt: publishing current doa -> {self.curr_doa[0]}")
+      if self.eta_correction:
+        self.past_doa[1:] = self.past_doa[:-1]
+        self.past_doa[0] = self.curr_doa[0]
+        self.past_doa_calc += 1
+        
+        if self.past_doa_calc >= self.past_doa_num:
+          if self.best_sdr == None:
+            self.best_sdr = self.curr_sdr[0]
+            self.best_doa = self.past_doa[-1]
+            #print("%f -> %f (first)" % (self.curr_sdr[0], self.past_doa[-1]))
+          elif self.curr_sdr[0] < self.best_sdr:
+            self.best_sdr = self.curr_sdr[0]
+            self.best_doa = self.past_doa[-1]
+            self.past_win_wo_corr = 0
+            #print("%f -> %f (updated best)" % (self.curr_sdr[0], self.past_doa[-1]))
+          else:
+            self.past_win_wo_corr += 1
+            if self.past_win_wo_corr >= self.past_win_wo_corr_max:
+              self.curr_doa[0] = self.best_doa
+              self.curr_doa[1] = 0.0
+              
+              self.past_doa = np.zeros(self.past_doa_num)
+              self.past_doa_calc = 0
+              self.best_sdr = None
+              
+              self.curr_sdr[0] = 0.0
+              self.curr_sdr[1] = 0.0
+              #self.curr_sdr[1] = self.curr_sdr[0]
+              
+              self.past_win_wo_corr = 0
+              
+              #print("sdr (corrected)")
+            #else:
+            #  print("sdr %f -> %f" % (self.curr_sdr[0], self.past_doa[-1]))
+      
+      
+      self.get_logger().info("publishing current doa -> %f" % self.curr_doa[0])
       msg = Float32()
       msg.data = self.curr_doa[0]
       self.publisher.publish(msg)
       
       #print(f"DOAOpt: giving time for the system to react to new theta...")
-      time.sleep(0.1)
+      time.sleep(self.wait_for_sdr)
       
       #print(f"DOAOpt: reading new SDR value...")
       self.request_sdr = True
       while self.request_sdr:
         time.sleep(0.001)
-      #print(f"DOAOpt: SDR -> {self.curr_sdr} - {t}")
       
       #print(f"DOAOpt: doing optimization...")
-      dw = self.gradient(self.curr_doa,self.curr_sdr) # 
+      dw = self.gradient(self.curr_doa,self.curr_sdr)
       #print(f"DOAOpt: current gradient is {dw}")
       
-      ## momentum update
-      self.m_dw = self.beta_m*self.m_dw + (1-self.beta_m)*dw
+      ## momentum beta 1
+      self.m_dw = self.beta1*self.m_dw + (1-self.beta1)*dw
       
-      ## variance update
-      self.v_dw = self.beta_v*self.v_dw + (1-self.beta_v)*(dw**2)
+      ## rms beta 2
+      self.v_dw = self.beta2*self.v_dw + (1-self.beta2)*(dw**2)
       
-      ## value update
+      ## update value
       self.curr_doa[1:] = self.curr_doa[:-1]
-      self.curr_doa[0] = self.curr_doa[0] - self.eta*(m_dw/(np.sqrt(v_dw)+self.epsilon))
+      self.curr_doa[0] = self.curr_doa[0] - self.eta*(self.m_dw/(np.sqrt(self.v_dw)+self.epsilon))
 
 def main(args=None):
   rclpy.init(args=args)

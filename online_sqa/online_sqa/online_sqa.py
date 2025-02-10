@@ -23,7 +23,7 @@ class OptScale(torch.nn.Module):
     return output
 
 class OnlineSQA(Node):
-  def __init__(self, hop_secs=0.1, win_len_secs=3.0):
+  def __init__(self):
     super().__init__('onlinesqa')
     
     self.device = "cuda:0"
@@ -34,27 +34,38 @@ class OnlineSQA(Node):
     
     self.publisher = self.create_publisher(Float32, '/SDR', 1000)
     
+    self.declare_parameter('hop_secs', 1.5)
+    self.hop_secs = self.get_parameter('hop_secs').get_parameter_value().double_value
+    self.declare_parameter('win_len_secs', 3.0)
+    self.win_len_secs = self.get_parameter('win_len_secs').get_parameter_value().double_value
+    self.declare_parameter('smooth_weight', 0.9)
+    self.smooth_weight = self.get_parameter('smooth_weight').get_parameter_value().double_value
+    
     self.objective_model = SQUIM_OBJECTIVE.get_model().to(self.device)
     
     self.samplerate = 16000
     self.vad_hop_len = 512 #Silvero-VAD only permits chunks of 512 at samplerate = 16000
     self.vad_hop_secs = self.vad_hop_len/self.samplerate
+    self.jack_hop_len = 1024 #taken from JACK configuration, make it so that it is a multiple of self.vad_hop_len
     
-    self.hop_secs = hop_secs
     self.hop_len = int(round(self.hop_secs*self.samplerate))
     self.hop_len = math.ceil(self.hop_len/self.vad_hop_len)*self.vad_hop_len
     self.hop_secs = self.hop_len/self.samplerate
     self.hop_i = 0
-    self.win_len_secs = win_len_secs
+    self.hop_i_ref = 0
+    
     self.win_len = int(round(self.win_len_secs*self.samplerate))
     self.win_len = math.ceil(self.win_len/self.vad_hop_len)*self.vad_hop_len
     self.win_len_secs = self.win_len/self.samplerate
     self.win = torch.zeros(1,self.win_len)
     
-    self.num_hops = int(self.win_len/self.hop_len)
-    self.vad_num_hops = math.ceil(self.win_len/self.vad_hop_len)
-    self.vad_num_hops_in_num_hops = int(self.hop_len/self.vad_hop_len)
-    self.min_num_hops_vad = self.vad_num_hops*3/4
+    self.num_hops = int(self.win_len/self.hop_len) 
+    self.vad_num_hops = math.ceil(self.win_len/self.vad_hop_len) 
+    self.vad_num_hops_in_num_hops = int(self.hop_len/self.vad_hop_len) 
+    self.num_hops_towait = int(self.vad_num_hops/3)
+    self.num_hops_vad = int(self.num_hops/2)
+    self.win_sdr_start = 0
+    self.win_sdr_end = 0
     
     self.get_logger().info('sample rate    : %d' % self.samplerate)
     self.get_logger().info('window length  : %f (%d samples)' % (self.win_len_secs, self.win_len))
@@ -62,12 +73,12 @@ class OnlineSQA(Node):
     self.get_logger().info('VAD hop length : %f (%d samples, %d hops in window, %d in hop length)' % (self.vad_hop_secs, self.vad_hop_len, self.vad_num_hops, self.vad_num_hops_in_num_hops))
     
     self.sqa_ready = False
+    self.sqa_ready_ref = False
     self.sqa_thread = Thread(target=self.do_sqa)
     self.sqa_thread.start()
     
-    self.smooth_weight = 0.90
     self.smooth_val = None
-    
+  
     self.vad, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', trust_repo=True)
     self.vad_threshold = 0.85
     self.vad_confs = torch.zeros(self.vad_num_hops)
@@ -90,7 +101,10 @@ class OnlineSQA(Node):
     
     if self.hop_i >= self.hop_len:
       #print(self.vad_confs)
-      if torch.sum(self.vad_confs) >= self.min_num_hops_vad:
+      if torch.sum(self.vad_confs) >= (self.vad_num_hops*3/4):
+        #the user has talked through the whole win_len window
+        self.win_sdr_start = 0
+        self.win_sdr_end = self.win_len
         while self.sqa_ready:
           time.sleep(0.01)
         self.sqa_ready = True
@@ -111,9 +125,11 @@ class OnlineSQA(Node):
       while not self.sqa_ready:
         time.sleep(0.001)
       
+      #print(self.vad_confs)
       #start_time = time.time()
+      #print(str(self.win_sdr_start)+" -> "+str(self.win_sdr_end))
       win_clone = self.win.to(self.device)
-      stoi_hyp, pesq_hyp, si_sdr_hyp = self.objective_model(win_clone[0,:].unsqueeze(0))
+      stoi_hyp, pesq_hyp, si_sdr_hyp = self.objective_model(win_clone[0,self.win_sdr_start:self.win_sdr_end].unsqueeze(0))
       unfiltered_observation = si_sdr_hyp.item()
       if math.isnan(unfiltered_observation):
         unfiltered_observation = 0.0
